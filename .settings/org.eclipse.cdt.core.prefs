@@ -1,0 +1,12 @@
+eclipse.preferences.version=1
+environment/project/0.1514657983/MAKERULES/delimiter=\:
+environment/project/0.1514657983/MAKERULES/operation=replace
+environment/project/0.1514657983/MAKERULES/value=/opt/tinyos-2.1.1/support/make/Makerules
+environment/project/0.1514657983/TOSDIR/delimiter=\:
+environment/project/0.1514657983/TOSDIR/operation=append
+environment/project/0.1514657983/TOSDIR/value=
+environment/project/0.1514657983/TOSROOT/delimiter=\:
+environment/project/0.1514657983/TOSROOT/operation=replace
+environment/project/0.1514657983/TOSROOT/value=/opt/tinyos-2.1.1
+environment/project/0.1514657983/append=true
+environment/project/0.1514657983/appendContributed=true
