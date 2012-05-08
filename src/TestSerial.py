@@ -5,7 +5,7 @@ import time
 from TOSSIM import *
 #from TestSerialMsg import *
 
-nodes = 4
+nodes = 8
 t = Tossim([])
 m = t.mac()
 r = t.radio()

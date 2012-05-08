@@ -6,6 +6,7 @@ implementation {
   components SerialActiveMessageC as AMSerial;
   components ActiveMessageC as AMRadio;
   components new TimerMilliC() as BeaconTimer;
+  components new TimerMilliC() as AckTimer;
 
   App.Boot -> MainC.Boot;
   
@@ -22,5 +23,6 @@ implementation {
   App.RadioAMPacket -> AMRadio;
   
   App.BeaconTimer -> BeaconTimer;
+  App.AckTimer -> AckTimer;
   App.Leds 	-> LedsC;
 }
