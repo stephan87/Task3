@@ -43,8 +43,8 @@ implementation
 	
 	// methods which capsulate the sending of messages
 	task void serialSendTask();
-  	void radioSendTask(TestSerialMsg* msgToSend);
-  	void beaconSendTask();
+  	void radioSend(TestSerialMsg* msgToSend);
+  	void beaconSend();
   	void initNeighborTable();
   	task void sendRadioAck();
   
@@ -77,7 +77,7 @@ implementation
 		{
 			//if(TOS_NODE_ID != 0 || testCounter<=3)
 			{
-  				beaconSendTask();
+  				beaconSend();
   				//testCounter++;
   			}
 		}
@@ -88,6 +88,7 @@ implementation
   	*/
   	event void AckTimer.fired()
   	{
+  		//TODO nodeBusy überprüfen wann das notwenig ist
   		int i;
   		bool needRetransmit = FALSE;
   		
@@ -114,7 +115,8 @@ implementation
   		if(needRetransmit)
   		{
   			dbg("TestSerialC","need retransmit\n");
-  			radioSendTask((TestSerialMsg*)&rcvRadio);
+  			radioSend((TestSerialMsg*)&rcvRadio);
+  			// TODO retransmit des letzen commandos...
   		}
   		else
   		{
@@ -146,7 +148,7 @@ implementation
   	event message_t *RadioReceive.receive[am_id_t id](message_t *msg, void *payload, uint8_t len)
   	{
   		//dbg("TestSerialC","received msg on channel %d\n",id);
-  		if(id == AM_BEACONMSG)
+  		if(id == AM_BEACONMSG && (sizeof(BeaconMsg)==len))
   		{
   			BeaconMsg *msgReceived;
   			int16_t freeSlot = -1;
@@ -186,7 +188,7 @@ implementation
   							curEntry->expired = TRUE;
   							if(!nodeBusy)
   							{
-  								curEntry->nodeId = -1;
+  								curEntry->nodeId = AM_MAXNODEID;
   								curEntry->lastContact = 0;
   							}
   						}
@@ -196,7 +198,9 @@ implementation
   			if(freeSlot == -1){
   				//dbg("TestSerialC","found NO free entry in neighbor table\n");
   			}
+  			// freier slot gefunden
   			else{
+  				// aber kein bereits vorhandener knoteneintrag
   				if(!found)
   				{
   					//dbg("TestSerialC","create new entry on position: %d for node %d\n",freeSlot,msgReceived->sender);
@@ -249,7 +253,7 @@ implementation
 	    		if(msgReceived->seqNum > localSeqNumber)
 	    		{
 	    			localSeqNumber = msgReceived->seqNum;
-    				radioSendTask(msgReceived);
+    				radioSend(msgReceived);
     			}
     			post sendRadioAck();
     		}
@@ -381,7 +385,7 @@ implementation
   		return msg;
   	}
 
-  	void radioSendTask(TestSerialMsg *receivedMsgToSend)
+  	void radioSend(TestSerialMsg *receivedMsgToSend)
   	{
 		// is radio unused?
 		if(!radioBusy)
@@ -404,7 +408,7 @@ implementation
 		}
   	}
   	
-  	void beaconSendTask()
+  	void beaconSend()
   	{
 		// is radio unused?
 		if(!radioBusy)
