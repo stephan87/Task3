@@ -46,17 +46,24 @@ implementation
 	SensorMsg localSensorMsg3; 
 	uint8_t readingSensor1; /* 0 to NREADINGS */
 	uint8_t readingSensor2;
-	uint8_t readingSensor3; 
+	uint8_t readingSensor3;
+	uint8_t readingMsg1;
+	uint8_t readingMsg2;
+	uint8_t readingMsg3;
+	message_t tableMsg;
+	message_t tableMsgSerial;
 	
 	
 	// methods which capsulate the sending of messages
 	task void serialSendTask();
   	void radioSend(CommandMsg* msgToSend);
   	void beaconSend();
+  	task void tableSendTask(); 
   	void initNeighborTable();
   	task void sendRadioAck();
   	void startSensorTimer();
   	void initSensor(uint8_t sensor);
+  	void serialSendTable(TableMsg* msg);
   
   	event void Boot.booted() {
 	
@@ -89,25 +96,25 @@ implementation
      * Inits localSensorMsg and readingSensor by parameter initSensor.
      * @param sensor If initSensor = 0 then init all sensors.
      */
-     void initSensor(uint8_t initSensor)
+     void initSensor(uint8_t sensor)
      {
-     	if(initSensor == 1 || (initSensor == 0))
+     	if(sensor == 1 || (sensor == 0))
      	{
-     		localSensorMsg1.interval = DEFAULT_INTERVAL;
+     		localSensorMsg1.interval = DEFAULT_SAMPLING_INTERVAL;
     		localSensorMsg1.id = TOS_NODE_ID;
     		localSensorMsg1.version = 0;
     		localSensorMsg1.sensor = 1;	
      	}
-     	if(initSensor == 2 || (initSensor == 0))
+     	if(sensor == 2 || (sensor == 0))
      	{
-     		localSensorMsg2.interval = DEFAULT_INTERVAL;
+     		localSensorMsg2.interval = DEFAULT_SAMPLING_INTERVAL;
     		localSensorMsg2.id = TOS_NODE_ID;
     		localSensorMsg2.version = 0;
     		localSensorMsg2.sensor = 2;	
      	}
-     	if(initSensor == 3 || (initSensor == 0))
+     	if(sensor == 3 || (sensor == 0))
      	{
-     		localSensorMsg3.interval = DEFAULT_INTERVAL;
+     		localSensorMsg3.interval = DEFAULT_SAMPLING_INTERVAL;
     		localSensorMsg3.id = TOS_NODE_ID;
     		localSensorMsg3.version = 0;
     		localSensorMsg3.sensor = 3;	
@@ -138,15 +145,15 @@ implementation
     	}
     	
     	// call read of sensor if sensor is active
-    	if(localSensorMsg1->sensor != 0)
+    	if(localSensorMsg1.sensor != 0)
     	{
     		//TODO call read()			
     	}
-    	if(localSensorMsg2->sensor != 0)
+    	if(localSensorMsg2.sensor != 0)
     	{
     		//TODO call read()			
     	}
-    	if(localSensorMsg3->sensor != 0)
+    	if(localSensorMsg3.sensor != 0)
     	{
     		//TODO call read()			
     	}
@@ -233,7 +240,7 @@ implementation
   	*/
   	event message_t *RadioReceive.receive[am_id_t id](message_t *msg, void *payload, uint8_t len)
   	{
-  		//dbg("TestSerialC","received msg on channel %d\n",id);
+  		dbg("TestSerialC","received msg on channel %d\n",id);
   		if(id == AM_BEACONMSG && (sizeof(BeaconMsg)==len))
   		{
   			BeaconMsg *msgReceived;
@@ -298,7 +305,7 @@ implementation
   		}
   		// got the right message to cast ?
   		 		
-  		if (len == sizeof(CommandMsg))
+  		if ((id == AM_COMMANDMSG) && (len == sizeof(CommandMsg)))
   		{
     		CommandMsg *msgReceived;
   			memcpy(&rcvRadio,payload,len);
@@ -344,7 +351,44 @@ implementation
     			post sendRadioAck();
     		}
 		}
+		if((id == AM_TABLEMSG) && (len == sizeof(TableMsg)))
+		{
+			//dbg("TestSerialC","received tablemsg over radio\n");
+			// if its node 0 then send over serial to pc, if not forward the message
+			if(TOS_NODE_ID == 0)
+			{
+				//dbg("TestSerialC","forward table message to serial\n");
+				serialSendTable((TableMsg*)payload);
+			}
+		}
     	return msg;
+  	}
+  	
+  	void serialSendTable(TableMsg* msg)
+  	{
+  		if(!serialBusy)
+  		{
+			int i;
+			TableMsg* msgToSend = (TableMsg*)(call SerialPacket.getPayload(&tableMsgSerial, sizeof (TableMsg)));
+			msgToSend->sender = msg->sender;
+			msgToSend->receiver = msg->receiver;
+			
+			for(i=0;i<AM_TABLESIZE;i++)
+			{
+				msgToSend->nodeId[i] = msg->nodeId[i];
+				msgToSend->lastContact[i] = msg->lastContact[i];
+				dbg("TestSerialC","before sending over serial nodeId: %d lastContact: %d\n",msgToSend->nodeId[i],msgToSend->lastContact[i]);
+			}
+					
+			// forward message
+			if(call SerialSend.send[AM_TABLEMSG](msg->receiver,&tableMsgSerial, sizeof(TableMsg)) == SUCCESS){
+				serialBusy = TRUE;
+				//dbg("TestSerialC","serial reflect\n");
+			}
+		}
+		else{
+			dbg("TestSerialC","serialBusy\n");
+		}
   	}
   
   	task void sendRadioAck()
@@ -408,7 +452,7 @@ implementation
 	    if (error == SUCCESS)
 	    {
 		// has the sent message the right pointer
-	      	if(&sndSerial == msg)
+	      	//if(&sndSerial == msg)
 	      	{
 	      		dbg("TestSerialC", "send done: serial\n");
 	      		serialBusy = FALSE;
@@ -510,6 +554,46 @@ implementation
 			}
 		}
   	}
+  	/*
+  	*	Task to forward table message to other nodes
+  	*/
+  	task void tableSendTask()
+  	{
+  		if(!radioBusy)
+  		{
+  			int i;
+  			
+  			TableMsg* msgToSend = (TableMsg*)(call RadioPacket.getPayload(&tableMsg, sizeof (TableMsg)));
+  			
+  			if(msgToSend == NULL)
+  			{
+  				dbg("TestSerialC","null pointer on msg struct\n");
+  				return;
+  			}
+  			msgToSend->sender = TOS_NODE_ID;
+  			msgToSend->receiver = 99;
+  			
+  			dbg("TestSerialC","start sending tableMsg\n");
+  			
+  			for(i=0;i<AM_TABLESIZE;i++)
+  			{
+  				dbg("TestSerialC","fill no %d: nodeId: %d lastCont: %d\n",i,neighborTable[i].nodeId,neighborTable[i].lastContact);
+  				msgToSend->nodeId[i] = neighborTable[i].nodeId;
+  				msgToSend->lastContact[i] = neighborTable[i].lastContact;
+  			}
+  			dbg("TestSerialC","after filling tableMsg\n");
+  			
+  			if(TOS_NODE_ID == 0)
+  			{
+  				serialSendTable(msgToSend);
+  				// forward message broadcast
+  			}else if(call RadioSend.send[AM_TABLEMSG](AM_BROADCAST_ADDR,&tableMsg, sizeof(TableMsg)) == SUCCESS)
+			{
+				radioBusy = TRUE;
+				dbg("TestSerialC","Node %d sent tableMessage message\n",TOS_NODE_ID);
+			}
+  		}
+  	}
 
   	event void RadioSend.sendDone[am_id_t id](message_t* msg, error_t error)
   	{
@@ -536,6 +620,10 @@ implementation
 	 				dbg("TestSerialC","send done for normal message-> start timer\n");
 	 				call AckTimer.startOneShot( AM_ACKTIMEOUT );
 	 			}
+	 		}
+	 		if(id == AM_BEACONMSG)
+	 		{
+	 			post tableSendTask();
 	 		}
 		}
 		radioBusy = FALSE;
