@@ -7,6 +7,7 @@ implementation {
   components ActiveMessageC as AMRadio;
   components new TimerMilliC() as BeaconTimer;
   components new TimerMilliC() as AckTimer;
+  components new TimerMiiliC() as SensorTimer;)
 
   App.Boot -> MainC.Boot;
   
@@ -24,5 +25,6 @@ implementation {
   
   App.BeaconTimer -> BeaconTimer;
   App.AckTimer -> AckTimer;
+  App.SensorTimer -> SensorTimer;
   App.Leds 	-> LedsC;
 }

@@ -19,6 +19,7 @@ module TestSerialC @safe()
 	
 		interface Timer<TMilli> as BeaconTimer;
 		interface Timer<TMilli> as AckTimer;
+		interface Timer<TMilli> as SensorTimer;
 	    interface Leds;
   	}
 }
@@ -35,18 +36,27 @@ implementation
 	message_t rcvRadio; ///< strores the current received message over radio
 	message_t beacon; 
 	am_addr_t addr;
+	message_t sndSensor;
+	message_t rcvSensor;
 	uint16_t testCounter = 0;
 	MoteTableEntry neighborTable[AM_TABLESIZE];
 	message_t radioSendQueue[AM_SENDRADIOQ_LEN];
-	
+	SensorMsg localSensorMsg1; /* Current local state - interval, version and accumulated readings */
+	SensorMsg localSensorMsg2;
+	SensorMsg localSensorMsg3; 
+	uint8_t readingSensor1; /* 0 to NREADINGS */
+	uint8_t readingSensor2;
+	uint8_t readingSensor3; 
 	
 	
 	// methods which capsulate the sending of messages
 	task void serialSendTask();
-  	void radioSend(TestSerialMsg* msgToSend);
+  	void radioSend(CommandMsg* msgToSend);
   	void beaconSend();
   	void initNeighborTable();
   	task void sendRadioAck();
+  	void startSensorTimer();
+  	void initSensor(uint8_t sensor);
   
   	event void Boot.booted() {
 	
@@ -67,6 +77,82 @@ implementation
   			//dbg("TestSerialC","init: %d\n",neighborTable[i].nodeId);
   		}
   	}
+  	
+  	/*
+  	 * Starts timer with DEFAULT_SAMPLING_INTERVAL to read sensors.
+  	 */
+  	void startSensorTimer() {
+    	call SensorTimer.startPeriodic(DEFAULT_SAMPLING_INTERVAL);
+    }
+    
+    /*
+     * Inits localSensorMsg and readingSensor by parameter initSensor.
+     * @param sensor If initSensor = 0 then init all sensors.
+     */
+     void initSensor(uint8_t initSensor)
+     {
+     	if(initSensor == 1 || (initSensor == 0))
+     	{
+     		localSensorMsg1.interval = DEFAULT_INTERVAL;
+    		localSensorMsg1.id = TOS_NODE_ID;
+    		localSensorMsg1.version = 0;
+    		localSensorMsg1.sensor = 1;	
+     	}
+     	if(initSensor == 2 || (initSensor == 0))
+     	{
+     		localSensorMsg2.interval = DEFAULT_INTERVAL;
+    		localSensorMsg2.id = TOS_NODE_ID;
+    		localSensorMsg2.version = 0;
+    		localSensorMsg2.sensor = 2;	
+     	}
+     	if(initSensor == 3 || (initSensor == 0))
+     	{
+     		localSensorMsg3.interval = DEFAULT_INTERVAL;
+    		localSensorMsg3.id = TOS_NODE_ID;
+    		localSensorMsg3.version = 0;
+    		localSensorMsg3.sensor = 3;	
+     	}	
+     }
+    
+    /* At each sample period:
+     - if local sample buffer is full, send accumulated samples
+     - read next sample
+  	*/
+    event void SensorTimer.fired()
+    {	
+    	// collected all data for this msg?
+    	if(readingMsg1 == NREADINGS)
+    	{
+    	 //TODO send message if radio is free , reset readings
+		// SensorMsgSend(localSensorMsg1);    	
+    	}
+    	if(readingMsg2 == NREADINGS)
+    	{
+    	 //TODO send message if radio is free , reset readings
+		// SensorMsgSend(localSensorMsg2);    	
+    	}
+    	if(readingMsg3 == NREADINGS)
+    	{
+    	 //TODO send message if radio is free , reset readings
+		// SensorMsgSend(localSensorMsg3);    	
+    	}
+    	
+    	// call read of sensor if sensor is active
+    	if(localSensorMsg1->sensor != 0)
+    	{
+    		//TODO call read()			
+    	}
+    	if(localSensorMsg2->sensor != 0)
+    	{
+    		//TODO call read()			
+    	}
+    	if(localSensorMsg3->sensor != 0)
+    	{
+    		//TODO call read()			
+    	}
+    	
+    	
+    } 
   	
   	/*
   	*	gets fired when a new beacon broadcast needs to be send
@@ -115,7 +201,7 @@ implementation
   		if(needRetransmit)
   		{
   			dbg("TestSerialC","need retransmit\n");
-  			radioSend((TestSerialMsg*)&rcvRadio);
+  			radioSend((CommandMsg*)&rcvRadio);
   			// TODO retransmit des letzen commandos...
   		}
   		else
@@ -212,11 +298,11 @@ implementation
   		}
   		// got the right message to cast ?
   		 		
-  		if (len == sizeof(TestSerialMsg))
+  		if (len == sizeof(CommandMsg))
   		{
-    		TestSerialMsg *msgReceived;
+    		CommandMsg *msgReceived;
   			memcpy(&rcvRadio,payload,len);
-    		msgReceived = (TestSerialMsg*)&rcvRadio;
+    		msgReceived = (CommandMsg*)&rcvRadio;
     		dbg("TestSerialC","Node %d received msg for %d from %d isAck: %d\n",TOS_NODE_ID,msgReceived->receiver,msgReceived->sender,msgReceived->isAck);
     		
 			if(msgReceived->receiver == TOS_NODE_ID)
@@ -267,9 +353,9 @@ implementation
   		// is radio unused?
 		if(!radioBusy)
 		{
-			TestSerialMsg* lastMsg = (TestSerialMsg*)&rcvRadio;
-			//TestSerialMsg* sent = (TestSerialMsg*)&sndRadio;
-			TestSerialMsg* msgToSend = (TestSerialMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (TestSerialMsg)));
+			CommandMsg* lastMsg = (CommandMsg*)&rcvRadio;
+			//CommandMsg* sent = (CommandMsg*)&sndRadio;
+			CommandMsg* msgToSend = (CommandMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (CommandMsg)));
 			//dbg("TestSerialC","override sndRadio\n");
 			//dbg("TestSerialC","send radio ack -> sndRadio-recv: %d sndRadio-sender: %d sndRadio-ack: %d\n",sent->receiver,sent->sender, sent->isAck);
 			
@@ -279,12 +365,12 @@ implementation
 			msgToSend->receiver = lastMsg->sender;
 			msgToSend->isAck = 1;
 			
-			memcpy(&sndRadioLast,msgToSend,sizeof(TestSerialMsg));
+			memcpy(&sndRadioLast,msgToSend,sizeof(CommandMsg));
 			
 			dbg("TestSerialC","send ack to: %d from %d\n",lastMsg->sender,TOS_NODE_ID);
 			
 			// forward message broadcast
-			if(call RadioSend.send[AM_TESTSERIALMSG](lastMsg->sender,&sndRadio, sizeof(TestSerialMsg)) == SUCCESS)
+			if(call RadioSend.send[AM_COMMANDMSG](lastMsg->sender,&sndRadio, sizeof(CommandMsg)) == SUCCESS)
 			{
 				radioBusy = TRUE;
 			}
@@ -298,8 +384,8 @@ implementation
   	{	
 		// is radio unused?
 		if(!serialBusy){
-			TestSerialMsg* msgReceived = (TestSerialMsg*)&rcvSerial;			
-			TestSerialMsg* msgToSend = (TestSerialMsg*)(call SerialPacket.getPayload(&sndSerial, sizeof (TestSerialMsg)));
+			CommandMsg* msgReceived = (CommandMsg*)&rcvSerial;			
+			CommandMsg* msgToSend = (CommandMsg*)(call SerialPacket.getPayload(&sndSerial, sizeof (CommandMsg)));
 			msgToSend->sender = TOS_NODE_ID;
 			msgToSend->seqNum = msgReceived->seqNum;
 			msgToSend->ledNum = msgReceived->ledNum;
@@ -307,7 +393,7 @@ implementation
 			msgToSend->isAck = TRUE;
 		
 			// forward message
-			if(call SerialSend.send[AM_TESTSERIALMSG](msgReceived->sender,&sndSerial, sizeof(TestSerialMsg)) == SUCCESS){
+			if(call SerialSend.send[AM_COMMANDMSG](msgReceived->sender,&sndSerial, sizeof(CommandMsg)) == SUCCESS){
 				serialBusy = TRUE;
 				//dbg("TestSerialC","serial reflect\n");
 			}
@@ -337,11 +423,11 @@ implementation
   	{  	
   		dbg("TestSerialC","received message on serial channel\n");	
   		// got the right message to cast ?
-  		if (len == sizeof(TestSerialMsg))
+  		if (len == sizeof(CommandMsg))
   		{
-    		TestSerialMsg *msgReceived;
+    		CommandMsg *msgReceived;
   			memcpy(&rcvSerial,payload,len);
-    		msgReceived = (TestSerialMsg*)&rcvSerial;
+    		msgReceived = (CommandMsg*)&rcvSerial;
     		    		
     		// check sequence number to avoid sending of duplicates
     		if(msgReceived->seqNum > localSeqNumber)
@@ -358,17 +444,17 @@ implementation
 	    			// is radio unused?
 	    			if(!radioBusy)
 	    			{   			
-						TestSerialMsg* msgToSend = (TestSerialMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (TestSerialMsg)));
+						CommandMsg* msgToSend = (CommandMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (CommandMsg)));
 						msgToSend->sender = TOS_NODE_ID;
 						msgToSend->seqNum = msgReceived->seqNum;
 						msgToSend->ledNum = msgReceived->ledNum;
 						msgToSend->receiver = msgReceived->receiver;
 						msgToSend->isAck = 0;
 						
-						memcpy(&sndRadioLast,msgToSend,sizeof(TestSerialMsg));
+						memcpy(&sndRadioLast,msgToSend,sizeof(CommandMsg));
 						
 						// forward message
-						if(call RadioSend.send[AM_TESTSERIALMSG](AM_BROADCAST_ADDR,&sndRadio, sizeof(TestSerialMsg)) == SUCCESS)
+						if(call RadioSend.send[AM_COMMANDMSG](AM_BROADCAST_ADDR,&sndRadio, sizeof(CommandMsg)) == SUCCESS)
 						{
 							dbg("TestSerialC", "message sent - msgToSend->isAck: %d, receiver: %d\n", msgToSend->isAck, msgToSend->receiver);
 							radioBusy = TRUE;
@@ -385,22 +471,22 @@ implementation
   		return msg;
   	}
 
-  	void radioSend(TestSerialMsg *receivedMsgToSend)
+  	void radioSend(CommandMsg *receivedMsgToSend)
   	{
 		// is radio unused?
 		if(!radioBusy)
 		{		
-			TestSerialMsg* msgToSend = (TestSerialMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (TestSerialMsg)));
+			CommandMsg* msgToSend = (CommandMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (CommandMsg)));
 			msgToSend->sender = TOS_NODE_ID;
 			msgToSend->seqNum = receivedMsgToSend->seqNum;
 			msgToSend->ledNum = receivedMsgToSend->ledNum;
 			msgToSend->receiver = receivedMsgToSend->receiver;
 			msgToSend->isAck = 0;
 			
-			memcpy(&sndRadioLast,msgToSend,sizeof(TestSerialMsg));
+			memcpy(&sndRadioLast,msgToSend,sizeof(CommandMsg));
 			
 			// forward message broadcast
-			if(call RadioSend.send[AM_TESTSERIALMSG](AM_BROADCAST_ADDR,&sndRadio, sizeof(TestSerialMsg)) == SUCCESS)
+			if(call RadioSend.send[AM_COMMANDMSG](AM_BROADCAST_ADDR,&sndRadio, sizeof(CommandMsg)) == SUCCESS)
 			{
 				radioBusy = TRUE;
 				dbg("TestSerialC","Node %d forwarded message\n",TOS_NODE_ID);
@@ -434,16 +520,16 @@ implementation
     	else
     	{
     		//dbg("TestSerialC","send done for ch id: %d\n",id);
-    		if(id == AM_TESTSERIALMSG)
+    		if(id == AM_COMMANDMSG)
     		{
-    			TestSerialMsg* sentMsg;
+    			CommandMsg* sentMsg;
 	    		if(TOS_NODE_ID == 0)
 	    		{
 	    			call Leds.led0Toggle();
 	    		}
  			
 	 			// start a timer within all neighbors in the table must acknowledge the receival
-	 			sentMsg = (TestSerialMsg*)&sndRadioLast;
+	 			sentMsg = (CommandMsg*)&sndRadioLast;
 	 			dbg("TestSerialC","sentMsg->isAck: %d, receiver: %d, sender: %d\n",sentMsg->isAck,sentMsg->receiver,sentMsg->sender);
 	 			if(!sentMsg->isAck)
 	 			{
