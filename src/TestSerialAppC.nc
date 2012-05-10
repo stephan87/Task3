@@ -10,9 +10,11 @@ implementation {
   components new TimerMilliC() as SensorTimer;
   
 #ifndef SIMULATION
-	components LocalTimeSecondC;
+  components LocalTimeSecondC;
   components new SensirionSht11C() as SensorHumidityTemperature;
   components new HamamatsuS1087ParC() as SensorLight;
+#else
+  components new DemoSensorC() as TossimDemoSensor;
 #endif
 
   App.Boot -> MainC.Boot;
@@ -39,5 +41,7 @@ implementation {
   App.SensorHumidity -> SensorHumidityTemperature.Humidity;
   App.SensorTemperature -> SensorHumidityTemperature.Temperature;
   App.SensorLight -> SensorLight;
+#else
+  App.SensorHumidity -> TossimDemoSensor;
 #endif
 }

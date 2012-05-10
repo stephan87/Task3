@@ -12,7 +12,8 @@ r = t.radio()
 sf = SerialForwarder(9002)
 #throttle = Throttle(t, 10)
 
-t.addChannel("TestSerialC", sys.stdout);
+#t.addChannel("TestSerialC", sys.stdout);
+t.addChannel("TestSerialCSensor", sys.stdout);
 
 f = open("topo.txt", "r")
 for line in f:
