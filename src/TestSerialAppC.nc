@@ -8,9 +8,12 @@ implementation {
   components new TimerMilliC() as BeaconTimer;
   components new TimerMilliC() as AckTimer;
   components new TimerMilliC() as SensorTimer;
-  components LocalTimeSecondC;
+  
+#ifndef SIMULATION
+	components LocalTimeSecondC;
   components new SensirionSht11C() as SensorHumidityTemperature;
   components new HamamatsuS1087ParC() as SensorLight;
+#endif
 
   App.Boot -> MainC.Boot;
   
@@ -30,8 +33,11 @@ implementation {
   App.AckTimer -> AckTimer;
   App.SensorTimer -> SensorTimer;
   App.Leds 	-> LedsC;
+  
+#ifndef SIMULATION
   App.LocalTime -> LocalTimeSecondC;
   App.SensorHumidity -> SensorHumidityTemperature.Humidity;
   App.SensorTemperature -> SensorHumidityTemperature.Temperature;
   App.SensorLight -> SensorLight;
+#endif
 }

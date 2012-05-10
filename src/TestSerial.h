@@ -1,5 +1,12 @@
 #ifndef TEST_SERIAL_H
 #define TEST_SERIAL_H
+#define SIMULATION2
+#ifdef SIMULATION
+#define GETTIME time(NULL)
+#else
+#define GETTIME call LocalTime.get()
+#endif
+
 
 enum {
   AM_COMMANDMSG 			= 6,

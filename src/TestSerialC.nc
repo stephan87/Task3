@@ -22,7 +22,9 @@ module TestSerialC @safe()
 		interface Timer<TMilli> as AckTimer;
 		interface Timer<TMilli> as SensorTimer;
 	    
+#ifndef SIMULATION
 	    interface LocalTime<TSecond>;
+#endif
 	    
 	    interface Leds;
 	    
@@ -77,6 +79,7 @@ implementation
   	void serialSendTable(TableMsg* msg);
   	void radioSendSensorMsg(SensorMsg* inputMsg);
   	void serialSendSensorMsg(SensorMsg* inputMsg);
+  	void radioSendTable(TableMsg* msg);
   	
   	// methods which uses sensors 
   	void startSensorTimer();
@@ -160,15 +163,21 @@ implementation
     	// call read of sensor if sensor is active
     	if(SensorHumidityMsg.sensor == 1)
     	{
-    		call SensorHumidity.read();			
+#ifndef SIMULATION
+    		call SensorHumidity.read();
+#endif
     	}
     	if(SensorTemperatureMsg.sensor == 2)
     	{
-    		call SensorTemperature.read();			
+#ifndef SIMULATION
+    		call SensorTemperature.read();
+#endif
     	}
     	if(SensorLightMsg.sensor == 3)
     	{
-    		call SensorLight.read();			
+#ifndef SIMULATION
+    		call SensorLight.read();
+#endif		
     	}
     	
     	
@@ -281,13 +290,13 @@ implementation
   					if(curEntry->nodeId == msgReceived->sender)
   					{
   						found = TRUE;
-  						curEntry->lastContact = call LocalTime.get(); // time(NULL); // returns seconds
+  						curEntry->lastContact = GETTIME; // time(NULL); // returns seconds
   						//dbg("TestSerialC","curEntry->nodeID: %d found entry for node: %d in neighbor table - update time\n",curEntry->nodeId,msgReceived->sender);
   					}
   					// otherwise delete the node in the table when the timelimit AM_BEACONTIMEOUT is reached
   					else
   					{
-  						uint16_t timediff = (call LocalTime.get() - curEntry->lastContact) ; // (time(NULL) - curEntry->lastContact);
+  						uint16_t timediff = (GETTIME - curEntry->lastContact) ; // (time(NULL) - curEntry->lastContact);
   						if(timediff > AM_BEACONTIMEOUT)
   						{
   							//dbg("TestSerialC","removed node %d from neighbor table - timediff: %d\n",curEntry->nodeId,timediff);
@@ -311,7 +320,7 @@ implementation
   				{
   					//dbg("TestSerialC","create new entry on position: %d for node %d\n",freeSlot,msgReceived->sender);
   					neighborTable[freeSlot].nodeId = msgReceived->sender;
-  					neighborTable[freeSlot].lastContact = call LocalTime.get(); //time(NULL);
+  					neighborTable[freeSlot].lastContact = GETTIME; //time(NULL);
   				}
   			}
   			return msg;
@@ -370,8 +379,32 @@ implementation
 			// if its node 0 then send over serial to pc, if not forward the message
 			if(TOS_NODE_ID == 0)
 			{
-				//dbg("TestSerialC","forward table message to serial\n");
+				TableMsg* curMsg = (TableMsg*)payload;
+				
+				dbg("TestSerialC","forward table message from %d to serial\n",curMsg->sender);
 				serialSendTable((TableMsg*)payload);
+			}
+			else
+			{
+				TableMsg* curMsg = (TableMsg*)payload;
+				
+				dbg("TestSerialC","forward table message from %d to %d\n",curMsg->sender,curMsg->receiver);
+				radioSendTable((TableMsg*)payload);
+			}
+		}
+		
+		if((id == AM_SENSORMSG) && (len == sizeof(SensorMsg)))
+		{
+			//dbg("TestSerialC","received tablemsg over radio\n");
+			// if its node 0 then send over serial to pc, if not forward the message
+			if(TOS_NODE_ID == 0)
+			{
+				//dbg("TestSerialC","forward table message to serial\n");
+				//serialSendSensorData((SensorMsg*)payload);
+			}
+			else
+			{
+				// forward message
 			}
 		}
     	return msg;
@@ -604,6 +637,20 @@ implementation
 			{
 				radioBusy = TRUE;
 				dbg("TestSerialC","Node %d sent tableMessage message\n",TOS_NODE_ID);
+			}
+  		}
+  	}
+  	void radioSendTable(TableMsg* msg)
+  	{
+  		if(!radioBusy)
+  		{
+  			TableMsg* tblMsg = call RadioPacket.getPayload(&tableMsg, sizeof (TableMsg));
+  			memcpy(tblMsg,msg,sizeof(TableMsg));
+  			
+  			if(call RadioSend.send[AM_TABLEMSG](AM_BROADCAST_ADDR,&tableMsg, sizeof(TableMsg)) == SUCCESS)
+			{
+				radioBusy = TRUE;
+				dbg("TestSerialC","Node %d forwarded tableMessage message from %d\n",TOS_NODE_ID, msg->sender);
 			}
   		}
   	}
