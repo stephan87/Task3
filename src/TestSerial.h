@@ -14,7 +14,8 @@ enum {
   AM_ACKTIMEOUT				= 2000,
   AM_MAXNODEID				= 65535,
   NREADINGS 				= 10, // count of samples
-  DEFAULT_SAMPLING_INTERVAL = 256 // Default sampling period.
+  DEFAULT_SAMPLING_INTERVAL = 256, // Default sampling period.
+  SERIAL_ADR				= 99 // serial address
 };
 
 typedef nx_struct CommandMsg {
@@ -43,7 +44,7 @@ typedef nx_struct SensorMsg {
   nx_uint16_t interval; /* Samping period. */
   nx_uint16_t id; /* Mote id of sending mote. */
   nx_uint16_t count; /* The readings are samples count * NREADINGS onwards */
-  nx_uint16_t readings[NREADINGS];
+  nx_uint16_t readings[NREADINGS]; /* "null or error" = 0xffff */
 } SensorMsg;
 
 typedef nx_struct TableMsg {

@@ -1,5 +1,6 @@
 #include "TestSerial.h"
 
+
 module TestSerialC @safe()
 {
 	uses {
@@ -20,11 +21,20 @@ module TestSerialC @safe()
 		interface Timer<TMilli> as BeaconTimer;
 		interface Timer<TMilli> as AckTimer;
 		interface Timer<TMilli> as SensorTimer;
+	    
+	    interface LocalTime<TSecond>;
+	    
 	    interface Leds;
+	    
+	    interface Read<uint16_t> as SensorHumidity;
+	    interface Read<uint16_t> as SensorTemperature;
+	    interface Read<uint16_t> as SensorLight;
+	    
   	}
 }
 implementation
 {
+
 	uint16_t localSeqNumber = 0; ///< stores the msg sequence number
 	bool radioBusy	= FALSE;
 	bool serialBusy	= FALSE;
@@ -36,22 +46,25 @@ implementation
 	message_t rcvRadio; ///< strores the current received message over radio
 	message_t beacon; 
 	am_addr_t addr;
-	message_t sndSensor;
-	message_t rcvSensor;
+	message_t sndSensor; // < strores the current sent message over radio
+	message_t rcvSensor; // < strores the current received message over radio
+	message_t tableMsg;
+	message_t tableMsgSerial;
+	message_t sndSensorSerial;
+	
 	uint16_t testCounter = 0;
 	MoteTableEntry neighborTable[AM_TABLESIZE];
 	message_t radioSendQueue[AM_SENDRADIOQ_LEN];
-	SensorMsg localSensorMsg1; /* Current local state - interval, version and accumulated readings */
-	SensorMsg localSensorMsg2;
-	SensorMsg localSensorMsg3; 
-	uint8_t readingSensor1; /* 0 to NREADINGS */
-	uint8_t readingSensor2;
-	uint8_t readingSensor3;
-	uint8_t readingMsg1;
-	uint8_t readingMsg2;
-	uint8_t readingMsg3;
-	message_t tableMsg;
-	message_t tableMsgSerial;
+	
+	SensorMsg SensorHumidityMsg; // collects sensor data to send ... sensor = 1
+	SensorMsg SensorTemperatureMsg; // collects sensor data to send ... sensor = 2
+	SensorMsg SensorLightMsg; // collects sensor data to send ... sensor = 3
+	/* 0 to NREADINGS */
+	uint8_t readingCountSensorHumidity;
+	uint8_t readingCountSensorTemperature;
+	uint8_t readingCountSensorLight;
+	
+	
 	
 	
 	// methods which capsulate the sending of messages
@@ -61,9 +74,17 @@ implementation
   	task void tableSendTask(); 
   	void initNeighborTable();
   	task void sendRadioAck();
-  	void startSensorTimer();
-  	void initSensor(uint8_t sensor);
   	void serialSendTable(TableMsg* msg);
+  	void radioSendSensorMsg(SensorMsg* inputMsg);
+  	void serialSendSensorMsg(SensorMsg* inputMsg);
+  	
+  	// methods which uses sensors 
+  	void startSensorTimer();
+  	void initSensors();
+  	void activateSensor(uint8_t sensor);
+  	void deactivateSensor(uint8_t sensor);
+  	
+  	
   
   	event void Boot.booted() {
 	
@@ -71,7 +92,9 @@ implementation
     	if(TOS_NODE_ID == 0){
     		call SerialControl.start();
     	}
+    	
     	initNeighborTable();
+    	initSensors();
     	call BeaconTimer.startPeriodic( AM_BEACONINTERVAL );
   	}
   	
@@ -85,41 +108,19 @@ implementation
   		}
   	}
   	
+  	/*******************************************************************************
+  	*
+  	*							Timers
+  	*
+  	*******************************************************************************/
+  	
   	/*
   	 * Starts timer with DEFAULT_SAMPLING_INTERVAL to read sensors.
   	 */
   	void startSensorTimer() {
     	call SensorTimer.startPeriodic(DEFAULT_SAMPLING_INTERVAL);
     }
-    
-    /*
-     * Inits localSensorMsg and readingSensor by parameter initSensor.
-     * @param sensor If initSensor = 0 then init all sensors.
-     */
-     void initSensor(uint8_t sensor)
-     {
-     	if(sensor == 1 || (sensor == 0))
-     	{
-     		localSensorMsg1.interval = DEFAULT_SAMPLING_INTERVAL;
-    		localSensorMsg1.id = TOS_NODE_ID;
-    		localSensorMsg1.version = 0;
-    		localSensorMsg1.sensor = 1;	
-     	}
-     	if(sensor == 2 || (sensor == 0))
-     	{
-     		localSensorMsg2.interval = DEFAULT_SAMPLING_INTERVAL;
-    		localSensorMsg2.id = TOS_NODE_ID;
-    		localSensorMsg2.version = 0;
-    		localSensorMsg2.sensor = 2;	
-     	}
-     	if(sensor == 3 || (sensor == 0))
-     	{
-     		localSensorMsg3.interval = DEFAULT_SAMPLING_INTERVAL;
-    		localSensorMsg3.id = TOS_NODE_ID;
-    		localSensorMsg3.version = 0;
-    		localSensorMsg3.sensor = 3;	
-     	}	
-     }
+        
     
     /* At each sample period:
      - if local sample buffer is full, send accumulated samples
@@ -128,34 +129,46 @@ implementation
     event void SensorTimer.fired()
     {	
     	// collected all data for this msg?
-    	if(readingMsg1 == NREADINGS)
+    	if(readingCountSensorHumidity == NREADINGS)
     	{
-    	 //TODO send message if radio is free , reset readings
-		// SensorMsgSend(localSensorMsg1);    	
+    	 	//TODO send message if radio is free , reset readings
+			// SensorMsgSend(SensorHumidityMsg); 
+			
+			// reset count
+			readingCountSensorHumidity = 0;
+				   	
     	}
-    	if(readingMsg2 == NREADINGS)
+    	if(readingCountSensorTemperature == NREADINGS)
     	{
-    	 //TODO send message if radio is free , reset readings
-		// SensorMsgSend(localSensorMsg2);    	
+    		//TODO send message if radio is free , reset readings
+			// SensorMsgSend(SensorTemperatureMsg);    
+			
+			// reset count
+			readingCountSensorHumidity = 0;
+				   		
     	}
-    	if(readingMsg3 == NREADINGS)
+    	if(readingCountSensorLight == NREADINGS)
     	{
-    	 //TODO send message if radio is free , reset readings
-		// SensorMsgSend(localSensorMsg3);    	
+    	 	//TODO send message if radio is free , reset readings
+			// SensorMsgSend(SensorLightMsg);    	
+		
+			// reset count
+			readingCountSensorHumidity = 0;
+				   	
     	}
     	
     	// call read of sensor if sensor is active
-    	if(localSensorMsg1.sensor != 0)
+    	if(SensorHumidityMsg.sensor == 1)
     	{
-    		//TODO call read()			
+    		call SensorHumidity.read();			
     	}
-    	if(localSensorMsg2.sensor != 0)
+    	if(SensorTemperatureMsg.sensor == 2)
     	{
-    		//TODO call read()			
+    		call SensorTemperature.read();			
     	}
-    	if(localSensorMsg3.sensor != 0)
+    	if(SensorLightMsg.sensor == 3)
     	{
-    		//TODO call read()			
+    		call SensorLight.read();			
     	}
     	
     	
@@ -268,13 +281,13 @@ implementation
   					if(curEntry->nodeId == msgReceived->sender)
   					{
   						found = TRUE;
-  						curEntry->lastContact = time(NULL); // returns seconds
+  						curEntry->lastContact = call LocalTime.get(); // time(NULL); // returns seconds
   						//dbg("TestSerialC","curEntry->nodeID: %d found entry for node: %d in neighbor table - update time\n",curEntry->nodeId,msgReceived->sender);
   					}
   					// otherwise delete the node in the table when the timelimit AM_BEACONTIMEOUT is reached
   					else
   					{
-  						uint16_t timediff = (time(NULL) - curEntry->lastContact);
+  						uint16_t timediff = (call LocalTime.get() - curEntry->lastContact) ; // (time(NULL) - curEntry->lastContact);
   						if(timediff > AM_BEACONTIMEOUT)
   						{
   							//dbg("TestSerialC","removed node %d from neighbor table - timediff: %d\n",curEntry->nodeId,timediff);
@@ -298,7 +311,7 @@ implementation
   				{
   					//dbg("TestSerialC","create new entry on position: %d for node %d\n",freeSlot,msgReceived->sender);
   					neighborTable[freeSlot].nodeId = msgReceived->sender;
-  					neighborTable[freeSlot].lastContact = time(NULL);
+  					neighborTable[freeSlot].lastContact = call LocalTime.get(); //time(NULL);
   				}
   			}
   			return msg;
@@ -628,4 +641,245 @@ implementation
 		}
 		radioBusy = FALSE;
   	}
+  	
+  	/*******************************************************************************
+  	*
+  	*				Sensors: init, activate, read and SensorMsg forwarding
+  	*
+  	********************************************************************************/
+
+
+	/*
+     * Activates sensors by parameter sensor and activates timer
+     * SensorHumidity = 1
+     * SensorTemperature = 2
+     * SensorLight = 3
+     * @param sensor activates sensor 1-3.
+     */
+     void activateSensor(uint8_t sensor)
+     {
+     	if(sensor == 1)
+     	{
+     		SensorHumidityMsg.sensor = 1;	
+     	}
+     	if(sensor == 2)
+     	{
+     		SensorTemperatureMsg.sensor = 2;	
+     	}
+     	if(sensor == 3)
+     	{
+     		SensorLightMsg.sensor = 3;	
+     	}
+     	
+     	startSensorTimer();	
+     }
+     
+     /*
+     * Deactivates sensors by parameter sensor.
+     * SensorHumidity = 1
+     * SensorTemperature = 2
+     * SensorLight = 3
+     * @param sensor deactivates sensor 1-3.
+     */
+     void deactivateSensor(uint8_t sensor)
+     {
+     	if(sensor == 1)
+     	{
+     		SensorHumidityMsg.sensor = 0;	
+     	}
+     	if(sensor == 2)
+     	{
+     		SensorTemperatureMsg.sensor = 0;	
+     	}
+     	if(sensor == 3)
+     	{
+     		SensorLightMsg.sensor = 0;	
+     	}	
+     }
+     
+     /*
+     * Inits all sensors messages and readingCounts.
+     */
+     void initSensors()
+     {
+     	int i;
+     	
+     	SensorHumidityMsg.interval = DEFAULT_SAMPLING_INTERVAL;
+    	SensorHumidityMsg.id = TOS_NODE_ID;
+    	SensorHumidityMsg.version = 0;
+    	SensorHumidityMsg.sensor = 0;
+    	SensorHumidityMsg.count = NREADINGS;	
+                 	
+     	SensorTemperatureMsg.interval = DEFAULT_SAMPLING_INTERVAL;
+    	SensorTemperatureMsg.id = TOS_NODE_ID;
+    	SensorTemperatureMsg.version = 0;
+    	SensorTemperatureMsg.sensor = 0;	
+    	SensorTemperatureMsg.count = NREADINGS;
+         	
+     	SensorLightMsg.interval = DEFAULT_SAMPLING_INTERVAL;
+    	SensorLightMsg.id = TOS_NODE_ID;
+    	SensorLightMsg.version = 0;
+    	SensorLightMsg.sensor = 0;	
+      	SensorLightMsg.count = NREADINGS;
+     	
+     	
+  		for(i = 0; i < NREADINGS; i++)
+  		{
+  			SensorHumidityMsg.readings[i] = 0xffff;
+  		}
+     	
+     	for(i = 0; i < NREADINGS; i++)
+  		{
+  			SensorTemperatureMsg.readings[i] = 0xffff;
+  		}
+     	
+     	for(i = 0; i < NREADINGS; i++)
+  		{
+  			SensorLightMsg.readings[i] = 0xffff;
+  		}
+  		
+  		
+  		readingCountSensorHumidity = 0;
+		readingCountSensorTemperature = 0;
+		readingCountSensorLight = 0;
+  			
+     }
+  	
+  	/*
+  	*	Gets data from sensor.
+  	* 	Writes data into the message.
+  	*	If reading was not successful then data = 0xffff.
+  	*/
+  	event void SensorHumidity.readDone(error_t result, uint16_t data) {
+  		
+  		// successful?
+	    if (result != SUCCESS)
+	    {
+			data = 0xffff;
+	    }
+	    
+	    // add data to message
+	    if (readingCountSensorHumidity < NREADINGS)
+	    { 
+	      	SensorHumidityMsg.readings[readingCountSensorHumidity++] = data;
+	  	}
+  	}
+  	
+  	
+  	/*
+  	*	Gets data from sensor.
+  	* 	Writes data into the message.
+  	*	If reading was not successful then data = 0xffff.
+  	*/
+  	event void SensorTemperature.readDone(error_t result, uint16_t data) {
+  		
+  		// successful?
+	    if (result != SUCCESS)
+	    {
+			data = 0xffff;
+	    }
+	    
+	    // add data to message
+	    if (readingCountSensorTemperature < NREADINGS)
+	    { 
+	      	SensorTemperatureMsg.readings[readingCountSensorTemperature++] = data;
+	  	}
+  	}
+  	
+  	/*
+  	*	Gets data from sensor.
+  	* 	Writes data into the message.
+  	*	If reading was not successful then data = 0xffff.
+  	*/
+  	event void SensorLight.readDone(error_t result, uint16_t data) {
+  		
+  		// successful?
+	    if (result != SUCCESS)
+	    {
+			data = 0xffff;
+	    }
+	    
+	    // add data to message
+	    if (readingCountSensorLight < NREADINGS)
+	    { 
+	      	SensorLightMsg.readings[readingCountSensorLight++] = data;
+	  	}
+  	}
+  	
+  	/*
+  	*	Sends a SensorMsg over radio.
+  	*	@param receivedMsgToSend pointer to received message
+  	*/
+  	void radioSendSensorMsg(SensorMsg* inputMsg)
+  	{
+  		int i;
+  		
+		// is radio unused?
+		if(!radioBusy)
+		{		
+			SensorMsg* msgToSend = (SensorMsg*)(call RadioPacket.getPayload(&sndSensor, sizeof (SensorMsg)));
+			
+			msgToSend->version = inputMsg->version;
+			msgToSend->sensor = inputMsg->sensor;
+			msgToSend->interval = inputMsg->interval;
+			msgToSend->id = inputMsg->id;
+			msgToSend->count = inputMsg->count;
+						
+			for(i=0; i < NREADINGS; i++)
+			{
+				msgToSend->readings[i] = inputMsg->readings[i];
+			}
+				
+			memcpy(&sndSensor,msgToSend,sizeof(SensorMsg));
+			
+			// forward message to serial or radio
+			if(TOS_NODE_ID == 0)
+			{
+				serialSendSensorMsg(msgToSend);
+			}
+			else if(call RadioSend.send[AM_SENSORMSG](AM_BROADCAST_ADDR,&sndSensor, sizeof(SensorMsg)) == SUCCESS)
+			{
+				radioBusy = TRUE;
+				dbg("TestSerialC","Node %d forwarded sensor message\n",TOS_NODE_ID);
+			}
+		}
+  	}
+  	
+  	/*
+  	*	Sends a SensorMsg over serial.
+  	* 	@param inputMsg SensorMsg pointer to message which should be sent.
+  	*/
+  	void serialSendSensorMsg(SensorMsg* inputMsg)
+  	{
+  		if(!serialBusy)
+  		{
+			int i;
+			
+			SensorMsg* msgToSend = (SensorMsg*)(call SerialPacket.getPayload(&sndSensorSerial, sizeof (SensorMsg)));
+			
+			msgToSend->version = inputMsg->version;
+			msgToSend->sensor = inputMsg->sensor;
+			msgToSend->interval = inputMsg->interval;
+			msgToSend->id = inputMsg->id;
+			msgToSend->count = inputMsg->count;
+						
+			for(i=0; i < NREADINGS; i++)
+			{
+				msgToSend->readings[i] = inputMsg->readings[i];
+			}
+			
+								
+			// forward message
+			if(call SerialSend.send[AM_SENSORMSG](SERIAL_ADR,&sndSensorSerial, sizeof(SensorMsg)) == SUCCESS){
+				serialBusy = TRUE;
+				//dbg("TestSerialC","serial reflect\n");
+			}
+		}
+		else{
+			dbg("TestSerialC","serialBusy\n");
+		}
+  	}
+  	
+  	
+  	
 } 
