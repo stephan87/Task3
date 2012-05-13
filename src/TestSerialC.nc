@@ -21,6 +21,7 @@ module TestSerialC @safe()
 		interface Timer<TMilli> as BeaconTimer;
 		interface Timer<TMilli> as AckTimer;
 		interface Timer<TMilli> as SensorTimer;
+		//interface Timer<TMilli> as TableSendTimer;
 	    
 #ifndef SIMULATION
 	    interface LocalTime<TSecond>;
@@ -38,6 +39,11 @@ implementation
 {
 
 	uint16_t localSeqNumber = 0; ///< stores the msg sequence number
+	uint16_t localSeqNumberSensor = 0;
+	uint16_t localSeqNumberTable = 0;
+	uint16_t lastRadioTableMsgSender = 0xffff;
+	uint16_t lastRadioSensorMsgSender = 0xffff; // not in use
+	uint16_t tableSendCounter = 0;
 	bool radioBusy	= FALSE;
 	bool serialBusy	= FALSE;
 	bool nodeBusy 	= FALSE;
@@ -70,7 +76,7 @@ implementation
 	
 	
 	// methods which capsulate the sending of messages
-	task void serialSendTask();
+	void serialSend();
   	void radioSend(CommandMsg* msgToSend);
   	void beaconSend();
   	task void tableSendTask(); 
@@ -98,10 +104,14 @@ implementation
     	
     	initNeighborTable();
     	initSensors();
+    	
+    	
+    	
 #ifdef SIMULATION
     	activateSensor(1);
 #endif
     	call BeaconTimer.startPeriodic( AM_BEACONINTERVAL );
+    	//call TableSendTimer.startPeriodic(TABLESENDTIMER_INTERVAL);
   	}
   	
   	void initNeighborTable()
@@ -137,14 +147,16 @@ implementation
     	// collected all data for this msg?
     	if(readingCountSensorHumidity == NREADINGS)
     	{
-    	 	//TODO send message if radio is free , reset readings
+    	 	// send message if radio is free , reset readings
     	 	if(TOS_NODE_ID == 0)
     	 	{
-				radioSendSensorMsg(&SensorHumidityMsg);
+				serialSendSensorMsg(&SensorHumidityMsg);
 			}
 			else
 			{
-				serialSendSensorMsg(&SensorHumidityMsg);
+				radioSendSensorMsg(&SensorHumidityMsg);
+				SensorHumidityMsg.seqNum = localSeqNumberSensor+1;
+				
 			}
 			
 			// reset count
@@ -153,8 +165,17 @@ implementation
     	}
     	if(readingCountSensorTemperature == NREADINGS)
     	{
-    		//TODO send message if radio is free , reset readings
-			radioSendSensorMsg(&SensorTemperatureMsg); 
+    		// send message if radio is free , reset readings
+    	 	if(TOS_NODE_ID == 0)
+    	 	{
+				serialSendSensorMsg(&SensorTemperatureMsg);
+			}
+			else
+			{
+				radioSendSensorMsg(&SensorTemperatureMsg);
+				SensorTemperatureMsg.seqNum = localSeqNumberSensor+1;
+				
+			}
 			
 			// reset count
 			readingCountSensorTemperature = 0;
@@ -162,8 +183,17 @@ implementation
     	}
     	if(readingCountSensorLight == NREADINGS)
     	{
-    	 	//TODO send message if radio is free , reset readings
-			radioSendSensorMsg(&SensorLightMsg);  	
+    	 	// send message if radio is free , reset readings
+    	 	if(TOS_NODE_ID == 0)
+    	 	{
+				serialSendSensorMsg(&SensorLightMsg);
+			}
+			else
+			{
+				radioSendSensorMsg(&SensorLightMsg);
+				SensorLightMsg.seqNum = localSeqNumberSensor+1;
+				
+			}
 		
 			// reset count
 			readingCountSensorLight = 0;
@@ -246,6 +276,17 @@ implementation
   			dbg("TestSerialC","successfully got all acks\n");
   		}
   	}
+  	
+  	
+  	/*
+  	*	Sends table over radio to serial every TABLESENDTIMERT_INTERVAL
+  	
+  	event void TableSendTimer.fired()
+  	{
+  		post tableSendTask();
+  	
+  	}
+  	*/
   	
 	// event which gets fired after the radio control is initialized
   	event void RadioControl.startDone(error_t error) {
@@ -364,8 +405,8 @@ implementation
     				int i;
     				dbg("TestSerialC","Finished Node %d: received message on RadioChannel seqNum: %d\n",TOS_NODE_ID,msgReceived->seqNum);
     				localSeqNumber = msgReceived->seqNum;
-    				call Leds.set(msgReceived->ledNum);
-    				for(i=0;i<2;i++)
+    			//	call Leds.set(msgReceived->ledNum);
+    				for(i=0;i<3;i++)
     				{
     					if(msgReceived->sensor[i] == 1)
     					{
@@ -395,37 +436,54 @@ implementation
 		}
 		if((id == AM_TABLEMSG) && (len == sizeof(TableMsg)))
 		{
+			TableMsg* curMsg = (TableMsg*)payload;
 			//dbg("TestSerialC","received tablemsg over radio\n");
 			// if its node 0 then send over serial to pc, if not forward the message
 			if(TOS_NODE_ID == 0)
 			{
-				TableMsg* curMsg = (TableMsg*)payload;
-				
+							
 				dbg("TestSerialC","forward table message from %d to serial\n",curMsg->sender);
-				serialSendTable((TableMsg*)payload);
+				serialSendTable((TableMsg*)curMsg);
+				
 			}
 			else
-			{
-				TableMsg* curMsg = (TableMsg*)payload;
+			{	
 				
-				dbg("TestSerialC","forward table message from %d to %d\n",curMsg->sender,curMsg->receiver);
-				radioSendTable((TableMsg*)payload);
+				curMsg = (TableMsg*)payload;
+				if((curMsg->seqNum > localSeqNumberTable) && (curMsg->sender != lastRadioTableMsgSender))
+				{
+					dbg("TestSerialC","forward table message from %d to %d\n",curMsg->sender,curMsg->receiver);
+					radioSendTable((TableMsg*)curMsg);
+					lastRadioTableMsgSender = curMsg->sender;
+					localSeqNumberTable = curMsg->seqNum;
+				}
 			}
 		}
 		
 		if((id == AM_SENSORMSG) && (len == sizeof(SensorMsg)))
-		{
+		{	
+			SensorMsg* curMsg = (SensorMsg*)payload;
 			//dbg("TestSerialC","received tablemsg over radio\n");
 			// if its node 0 then send over serial to pc, if not forward the message
 			if(TOS_NODE_ID == 0)
 			{
+				
 				dbg("TestSerialCSensor","node 0 received sensor data - forward to serial\n");
-				serialSendSensorMsg((SensorMsg*)payload);
+				serialSendSensorMsg((SensorMsg*)curMsg);
+				//call Leds.led1Toggle();
 			}
 			else
 			{
-				dbg("TestSerialCSensor","node % received sensor data - forward over radio\n",TOS_NODE_ID);
-				radioSendSensorMsg((SensorMsg*)payload);
+				if((curMsg->seqNum > localSeqNumberSensor) && (curMsg->sender != lastRadioSensorMsgSender))
+				{
+				
+					dbg("TestSerialCSensor","node % received sensor data - forward over radio\n",TOS_NODE_ID);
+					radioSendSensorMsg((SensorMsg*)curMsg);
+					//call Leds.led0Toggle();
+					lastRadioSensorMsgSender = curMsg->sender;
+					localSeqNumberSensor = curMsg->seqNum;
+					
+				}
 			}
 		}
     	return msg;
@@ -491,7 +549,7 @@ implementation
 	/*
 	*	Sends the received message from pc directly back to the pc (used as a message received indication)
 	*/
-  	task void serialSendTask() 
+  	void serialSend() 
   	{	
 		// is radio unused?
 		if(!serialBusy){
@@ -523,7 +581,7 @@ implementation
 	      	{
 	      		dbg("TestSerialCSend", "send done: serial on id %d\n",id);
 	      		serialBusy = FALSE;
-	      		call Leds.led1Toggle();
+	      		//call Leds.led1Toggle();
 	      		return;
 	      	}
 	    }
@@ -547,12 +605,28 @@ implementation
     			
     			if(msgReceived->receiver == TOS_NODE_ID)
     			{
-    				call Leds.set(msgReceived->ledNum);
-    				post serialSendTask();
+    				
+    				int i;
+	    			dbg("TestSerialC","Finished Node %d: received message on RadioChannel seqNum: %d\n",TOS_NODE_ID,msgReceived->seqNum);
+	    			localSeqNumber = msgReceived->seqNum;
+	    			//	call Leds.set(msgReceived->ledNum);
+	    			for(i=0;i<3;i++)
+	    			{
+	    				if(msgReceived->sensor[i] == 1)
+	    				{
+	    					activateSensor(i+1);
+	    				}
+	    				else
+	    				{
+	    					deactivateSensor(i+1);
+	    				}
+	    			}
+    				
+    				serialSend();
     			}
     			else
     			{
-	    			// is radio unused?
+	    			// is radserialSend();io unused?
 	    			if(!radioBusy)
 	    			{   			
 						CommandMsg* msgToSend = (CommandMsg*)(call RadioPacket.getPayload(&sndRadio, sizeof (CommandMsg)));
@@ -560,7 +634,10 @@ implementation
 						msgToSend->seqNum = msgReceived->seqNum;
 						msgToSend->ledNum = msgReceived->ledNum;
 						msgToSend->receiver = msgReceived->receiver;
-						msgToSend->isAck = 0;
+						msgToSend->sensor[0] = msgReceived->sensor[0];
+						msgToSend->sensor[1] = msgReceived->sensor[1];
+						msgToSend->sensor[2] = msgReceived->sensor[2];
+						msgToSend->isAck = 0; 
 						
 						memcpy(&sndRadioLast,msgToSend,sizeof(CommandMsg));
 						
@@ -569,7 +646,7 @@ implementation
 						{
 							dbg("TestSerialC", "message sent - msgToSend->isAck: %d, receiver: %d\n", msgToSend->isAck, msgToSend->receiver);
 							radioBusy = TRUE;
-							post serialSendTask();
+							serialSend();
 						}
 					}
 					else
@@ -639,6 +716,7 @@ implementation
   			}
   			msgToSend->sender = TOS_NODE_ID;
   			msgToSend->receiver = 99;
+  			msgToSend->seqNum = localSeqNumberTable +1;
   			
   			dbg("TestSerialC","start sending tableMsg\n");
   			
@@ -702,10 +780,15 @@ implementation
 	 				call AckTimer.startOneShot( AM_ACKTIMEOUT );
 	 			}
 	 		}
-	 		if(id == AM_BEACONMSG)
+	 		if(id == AM_BEACONMSG && (tableSendCounter==6))
 	 		{
-	 			post tableSendTask();
+	 			post tableSendTask(); 
+	 			tableSendCounter = 0;
 	 		}
+	 		else if (id == AM_BEACONMSG )
+	 		{
+	 		tableSendCounter++;
+			}
 		}
 		radioBusy = FALSE;
   	}
@@ -777,21 +860,21 @@ implementation
      	
      	SensorHumidityMsg.interval = DEFAULT_SAMPLING_INTERVAL;
     	SensorHumidityMsg.sender = TOS_NODE_ID;
-    	SensorHumidityMsg.version = 0;
+    	SensorHumidityMsg.receiver = SERIAL_ADDR;
     	SensorHumidityMsg.sensor = 0;
-    	SensorHumidityMsg.count = NREADINGS;	
+    	SensorHumidityMsg.seqNum = 1;	
                  	
      	SensorTemperatureMsg.interval = DEFAULT_SAMPLING_INTERVAL;
     	SensorTemperatureMsg.sender = TOS_NODE_ID;
-    	SensorTemperatureMsg.version = 0;
+    	SensorTemperatureMsg.receiver = SERIAL_ADDR;
     	SensorTemperatureMsg.sensor = 0;	
-    	SensorTemperatureMsg.count = NREADINGS;
+    	SensorTemperatureMsg.seqNum = 1;
          	
      	SensorLightMsg.interval = DEFAULT_SAMPLING_INTERVAL;
     	SensorLightMsg.sender = TOS_NODE_ID;
-    	SensorLightMsg.version = 0;
+    	SensorLightMsg.receiver = SERIAL_ADDR;
     	SensorLightMsg.sensor = 0;	
-      	SensorLightMsg.count = NREADINGS;
+      	SensorLightMsg.seqNum = 1;
      	
      	
   		for(i = 0; i < NREADINGS; i++)
@@ -890,7 +973,7 @@ implementation
   			memcpy(msgToSend,msg,sizeof(SensorMsg));
 		
 			// forward message
-			if(call SerialSend.send[AM_SENSORMSG](99,&sndSensorSerial, sizeof(SensorMsg)) == SUCCESS){
+			if(call SerialSend.send[AM_SENSORMSG](SERIAL_ADDR,&sndSensorSerial, sizeof(SensorMsg)) == SUCCESS){
 				serialBusy = TRUE;
 				dbg("TestSerialCSensor","send serial sensor data successful\n");
 			}
@@ -914,7 +997,7 @@ implementation
   			
   			//dbg("TestSerialCSensor","RadioSendSensorMsg\n");
   			
-  			if(call RadioSend.send[AM_SENSORMSG](SERIAL_ADDR,&sndSensor, sizeof(SensorMsg)) == SUCCESS)
+  			if(call RadioSend.send[AM_SENSORMSG](AM_BROADCAST_ADDR,&sndSensor, sizeof(SensorMsg)) == SUCCESS)
 			{
 				radioBusy = TRUE;
 				dbg("TestSerialCSensor","Node %d forwarded sensor data from node: %d sensor: %d\n",TOS_NODE_ID, msg->sender,msg->sensor);

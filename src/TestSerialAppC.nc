@@ -8,6 +8,7 @@ implementation {
   components new TimerMilliC() as BeaconTimer;
   components new TimerMilliC() as AckTimer;
   components new TimerMilliC() as SensorTimer;
+  //components new TimerMilliC() as TableSendTimer;
   
 #ifndef SIMULATION
   components LocalTimeSecondC;
@@ -34,6 +35,7 @@ implementation {
   App.BeaconTimer -> BeaconTimer;
   App.AckTimer -> AckTimer;
   App.SensorTimer -> SensorTimer;
+ // App.TableSendTimer -> TableSendTimer;
   App.Leds 	-> LedsC;
   
 #ifndef SIMULATION
