@@ -5,15 +5,15 @@ import time
 from TOSSIM import *
 #from TestSerialMsg import *
 
-nodes = 4
+nodes = 3
 t = Tossim([])
 m = t.mac()
 r = t.radio()
 sf = SerialForwarder(9002)
 #throttle = Throttle(t, 10)
 
-#t.addChannel("TestSerialC", sys.stdout);
-t.addChannel("TestSerialCSensor", sys.stdout);
+t.addChannel("TestSerialC", sys.stdout);
+#t.addChannel("TestSerialCSensor", sys.stdout);
 
 f = open("topo.txt", "r")
 for line in f:
@@ -39,7 +39,7 @@ for i in range(0, nodes):
 
 for i in range (0, 1000000):
 	t.runNextEvent();
-	time.sleep(0.1);
+	time.sleep(0.05);
 	sf.process();
 
 
