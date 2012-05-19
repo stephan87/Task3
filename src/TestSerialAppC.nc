@@ -8,6 +8,10 @@ implementation {
   components new TimerMilliC() as BeaconTimer;
   components new TimerMilliC() as AckTimer;
   components new TimerMilliC() as SensorTimer;
+  components new QueueC(message_t*, 10) as RadioQueueC;
+  components new PoolC(message_t, 10) as RadioMsgPoolC;
+//  components CC2420ActiveMessageC;
+  components RandomC;
   
 #ifndef SIMULATION
   components LocalTimeSecondC;
@@ -35,6 +39,10 @@ implementation {
   App.AckTimer -> AckTimer;
   App.SensorTimer -> SensorTimer;
   App.Leds 	-> LedsC;
+//  App.CC2420Packet -> CC2420ActiveMessageC;
+  App.Random -> RandomC;
+  App.RadioQueue -> RadioQueueC;
+  App.RadioMsgPool -> RadioMsgPoolC;
   
 #ifndef SIMULATION
   App.LocalTime -> LocalTimeSecondC;
