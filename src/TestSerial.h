@@ -2,7 +2,7 @@
 #define TEST_SERIAL_H
 
 // define SIMULATION if you want to use Tossim, otherwise don't
-#define SIMULATION
+#define SIMULATION2
 #ifdef SIMULATION
 #define GETTIME time(NULL)
 #else

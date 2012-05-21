@@ -44,8 +44,8 @@ for i in range(0, nodes):
 for i in range (0, 1000000):
 	t.runNextEvent();
 	time.sleep(0.01);
-	if i == 500:
-		t.getNode(2).turnOff();
+	if i == 800:
+		t.getNode(4).turnOff();
 	sf.process();
 
 

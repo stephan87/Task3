@@ -104,6 +104,7 @@ implementation
   	message_t sendbuf;
   	int seqNums[10];
   	int seqSensors[10];
+  	bool checkForAck = FALSE;
 	
 	// other methods
   	bool isChild(uint16_t moteId);
@@ -177,7 +178,14 @@ implementation
 					SensorMsg *sent = (SensorMsg*)(call RadioPacket.getPayload(qMsg, sizeof (SensorMsg))); // jump to starting pointer
 					msgLen = sizeof(SensorMsg);
 					receiver = chosenParent;
-					call PacketAcknowledgements.requestAck(qMsg);
+					if((call PacketAcknowledgements.requestAck(qMsg)) == SUCCESS)
+					{
+						checkForAck = TRUE;
+					}
+					else
+					{
+						checkForAck = FALSE;
+					}
 					
 					//dbg("TestSerialC","Queue: Start sending SensorMsg\n");
 					memcpy(&sndRadioLast,sent,msgLen);
@@ -188,7 +196,14 @@ implementation
 					TableMsg *sent = (TableMsg*)(call RadioPacket.getPayload(qMsg, sizeof (TableMsg))); // jump to starting pointer
 					msgLen = sizeof(TableMsg);
 					receiver = chosenParent; //AM_BROADCAST_ADDR;
-					call PacketAcknowledgements.requestAck(qMsg);
+					if((call PacketAcknowledgements.requestAck(qMsg)) == SUCCESS)
+					{
+						checkForAck = TRUE;
+					}
+					else
+					{
+						checkForAck = FALSE;
+					}
 					
 					//dbg("TestSerialC","Queue: Start sending TableMsg from %d to %d\n",sent->sender,sent->receiver);
 					//dbg("TestSerialC","Queue: receiver: %d sndRadio-sender: %d\n",sent->receiver,sent->sender);
@@ -638,6 +653,7 @@ implementation
     					}
     				}
     				// enable/disable led
+    				dbg("TestSerialC","ääääää äääääääää activate led\n");
     				call Leds.set(msgReceived->ledNum);
     			}
     			else
@@ -759,7 +775,7 @@ implementation
   	*/
   	void serialSendTable(TableMsg* msg)
   	{
-  		dbg("TestSerialC","serialSendTable\n");
+  		//dbg("TestSerialC","serialSendTable\n");
   		if(!serialBusy)
   		{
 			int i;
@@ -1021,14 +1037,20 @@ implementation
 		message_t *newMsg;
 		TableMsg* msgToSend;
 		
-		if(msgToSend == NULL || chosenParent == UNDEFINED)
+		if(chosenParent == UNDEFINED)
 		{
-			dbg("TestSerialC","null pointer on msg struct\n");
+			dbg("TestSerialC","chosen parent undefined\n");
 			return;
 		}
 		
 		newMsg = call RadioMsgPool.get();
 		msgToSend = (TableMsg*)(call RadioPacket.getPayload(newMsg, sizeof (TableMsg)));
+		
+		if(msgToSend == NULL)
+		{
+			dbg("TestSerialC","msgToSend is null\n");
+			return;
+		}
 		//dbg("TestSerialC","got table msg from pool\n");
 		
 		msgToSend->sender = TOS_NODE_ID;
@@ -1100,7 +1122,6 @@ implementation
 		else{
 			post sendQueueTask();
 		}
-	
   	}
   	
   	/*
@@ -1144,7 +1165,7 @@ implementation
 	 			sentMsg = (TableMsg*)&sndRadioLast;
 	 			
 	 			acked = call PacketAcknowledgements.wasAcked(msg);
-	 			if(!acked)
+	 			if(!acked && checkForAck)
 	 			{
 	 				dbg("Acked","retransmit tableMsg %d\n",acked);
 	 				forwardTable((TableMsg*)&sndRadioLast);
@@ -1154,7 +1175,7 @@ implementation
 			{
 				bool acked;
 				acked = call PacketAcknowledgements.wasAcked(msg);
-	 			if(!acked)
+	 			if(!acked && checkForAck)
 	 			{
 	 				dbg("Acked","retransmit sensorMsg %d\n",acked);
 	 				radioSendSensorMsg((SensorMsg*)&sndRadioLast);
@@ -1164,7 +1185,7 @@ implementation
 		radioBusy = FALSE;
 		if(call RadioMsgPool.put(msg) == SUCCESS)
 		{
-			//dbg("Pool","elements in pool: %d\n",(call RadioMsgPool.size()));
+			dbg("Pool","elements in pool: %d\n",(call RadioMsgPool.size()));
 		}
 		else
 		{
