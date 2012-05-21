@@ -12,8 +12,8 @@ r = t.radio()
 sf = SerialForwarder(9002)
 #throttle = Throttle(t, 10)
 
-#t.addChannel("TestSerialC", sys.stdout);
-t.addChannel("TestSerialCSensor", sys.stdout);
+t.addChannel("TestSerialC", sys.stdout);
+#t.addChannel("TestSerialCSensor", sys.stdout);
 #t.addChannel("Routing",sys.stdout);
 #t.addChannel("Pool",sys.stdout);
 #t.addChannel("TestSerialCSerial",sys.stdout);

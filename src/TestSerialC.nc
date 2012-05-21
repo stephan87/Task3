@@ -344,13 +344,13 @@ implementation
   	{
   		enqBeacon();
   		if( tableSendCounter==2 )
-	 			{
-	 				enqTable(); 
-	 				tableSendCounter = 0;
-	 			}
-	 			else
-	 			{
-	 				tableSendCounter++;
+ 			{
+ 				enqTable(); 
+ 				tableSendCounter = 0;
+ 			}
+ 			else
+ 			{
+ 				tableSendCounter++;
 	 	}
   	}
   	
@@ -560,7 +560,7 @@ implementation
   					chosenParent = 0xffff;
   					localVersion = msgReceived->version;
   					localAvgRSSI = 0;
-  					localHops = 0xffff;
+  					localHops = UNDEFINED;
   				}
   				else
   				{
@@ -759,6 +759,7 @@ implementation
   	*/
   	void serialSendTable(TableMsg* msg)
   	{
+  		dbg("TestSerialC","serialSendTable\n");
   		if(!serialBusy)
   		{
 			int i;
