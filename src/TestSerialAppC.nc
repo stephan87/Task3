@@ -43,6 +43,7 @@ implementation {
   App.Random -> RandomC;
   App.RadioQueue -> RadioQueueC;
   App.RadioMsgPool -> RadioMsgPoolC;
+  App.PacketAcknowledgements -> AMRadio.PacketAcknowledgements;
   
 #ifndef SIMULATION
   App.LocalTime -> LocalTimeSecondC;

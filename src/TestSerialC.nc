@@ -33,8 +33,9 @@ module TestSerialC @safe()
 	    
 	    interface Queue<message_t *> as RadioQueue;
 	    interface Pool<message_t> as RadioMsgPool;
-//	    interface CC2420Packet;
+	//    interface CC2420Packet;
 	    interface Random;
+	    interface PacketAcknowledgements;
   	}
 }
 implementation
@@ -115,14 +116,15 @@ implementation
   	event void Boot.booted() 
   	{	
     	call RadioControl.start();
-    	if(TOS_NODE_ID == 0){
+    	if(TOS_NODE_ID == 0)
+    	{
     		call SerialControl.start();
     		// routing... new version
     		localVersion = call Random.rand16(); 
     		localHops = 0; 	// lower is better
-		localAvgRSSI = 255;		// higher is better
-		chosenParent = 0; // 0xffff = no parent 
-   	}
+			localAvgRSSI = 255;		// higher is better
+			chosenParent = 0; // 0xffff = no parent 
+   		}
     	
     	initNeighborTable();
     	initSensors();
@@ -174,7 +176,9 @@ implementation
 				{
 					SensorMsg *sent = (SensorMsg*)(call RadioPacket.getPayload(qMsg, sizeof (SensorMsg))); // jump to starting pointer
 					msgLen = sizeof(SensorMsg);
-					receiver = AM_BROADCAST_ADDR;//sent->receiver;
+					receiver = chosenParent;
+					call PacketAcknowledgements.requestAck(qMsg);
+					
 					//dbg("TestSerialC","Queue: Start sending SensorMsg\n");
 					memcpy(&sndRadioLast,sent,msgLen);
 					break;
@@ -183,7 +187,8 @@ implementation
 				{
 					TableMsg *sent = (TableMsg*)(call RadioPacket.getPayload(qMsg, sizeof (TableMsg))); // jump to starting pointer
 					msgLen = sizeof(TableMsg);
-					receiver = AM_BROADCAST_ADDR;//sent->receiver;
+					receiver = chosenParent; //AM_BROADCAST_ADDR;
+					call PacketAcknowledgements.requestAck(qMsg);
 					
 					//dbg("TestSerialC","Queue: Start sending TableMsg from %d to %d\n",sent->sender,sent->receiver);
 					//dbg("TestSerialC","Queue: receiver: %d sndRadio-sender: %d\n",sent->receiver,sent->sender);
@@ -338,6 +343,15 @@ implementation
   	event void BeaconTimer.fired()
   	{
   		enqBeacon();
+  		if( tableSendCounter==2 )
+	 			{
+	 				enqTable(); 
+	 				tableSendCounter = 0;
+	 			}
+	 			else
+	 			{
+	 				tableSendCounter++;
+	 	}
   	}
   	
   	/*
@@ -348,19 +362,21 @@ implementation
   		int i;
   		bool needRetransmit = FALSE;
   		
+  		//dbg("Routing","############################ Ack fired\n");
   		for(i=0;i<AM_TABLESIZE;i++)
   		{
   			MoteTableEntry *curEntry = &neighborTable[i];
   			
   			if(curEntry->nodeId != AM_MAXNODEID)
   			{
-  				dbg("TestSerialC","Table: Node: %d expired: %d ackReceived: %d\n",curEntry->nodeId,curEntry->expired, curEntry->ackReceived);
+  				dbg("Routing","Table: Node: %d expired: %d ackReceived: %d\n",curEntry->nodeId,curEntry->expired, curEntry->ackReceived);
   				// either the node which got a cmd message isn't present any more or the acknowledgement wasn't received correctly
 	  			if(curEntry->expired || !curEntry->ackReceived)
 	  			{
 	  				needRetransmit = TRUE;
 	  				
-	  				if(curEntry->expired){
+	  				if(curEntry->expired)
+	  				{
 	  					curEntry->nodeId = AM_MAXNODEID;
 	  					curEntry->lastContact = 0;
 	  					curEntry->expired = FALSE;
@@ -368,21 +384,17 @@ implementation
   						curEntry->childMote = FALSE;
   						curEntry->hops = 0xffff;
   						curEntry->avgRSSI = 0;
-	  					
-	  					// connection  to parent is lost ... route failure... reset parent and broadcast lost connection
-	  					if(curEntry->nodeId == chosenParent)
-	  					{	
-	  						dbg("Routing", "Connection to mote %d lost!", curEntry->nodeId);
-	  						localHops = 0xffff; 	// lower is better
-	 						localAvgRSSI = 0;	    // higher is better
-	 						chosenParent = 0xffff; 	// 0xffff = no parent 
-	 						localVersion = call Random.rand16();
-	 						if(localVersion == 0xffff) localVersion--;
-							
-	 						enqBeacon();
-	  					}
 	  				}
+	  				else
+	  				{
+	  					//dbg("Routing", "ack timer fired but not expired!\n", curEntry->nodeId);
+	  				}
+	  				
 	  			}
+	  		}
+	  		else
+	  		{
+	  			//dbg("Routing", "no entry found!\n");
 	  		}
   		}
   		
@@ -435,7 +447,7 @@ implementation
   			msgReceived = (BeaconMsg*)payload;
   			
   			//calculate avgRSSI
-  			avgRssiOfSender = (55) / (msgReceived->hops + 1); //call CC2420Packet.getRssi(msg)
+  			avgRssiOfSender = 55;//(call CC2420Packet.getRssi(msg)) / (msgReceived->hops + 1); 
   			
   			
   			// when received a beacon add an entry to the neighbour table and ack
@@ -458,7 +470,7 @@ implementation
   						found = TRUE;
   						curEntry->lastContact = GETTIME; // time(NULL); // returns seconds
   						curEntry->parentMote = msgReceived->parent;
-  						dbg("Routing","Received Beacon from %d, parent=%d, hops=%d\n",msgReceived->sender, msgReceived->parent,msgReceived->hops);
+  						//dbg("Routing","Received Beacon from %d, parent=%d, hops=%d\n",msgReceived->sender, msgReceived->parent,msgReceived->hops);
   						if(msgReceived->parent == TOS_NODE_ID) // mote has selected my mote as parent
   						{
   							curEntry->childMote = TRUE;
@@ -480,13 +492,26 @@ implementation
   						{
   							//dbg("TestSerialC","removed node %d from neighbor table - timediff: %d\n",curEntry->nodeId,timediff);
   							curEntry->expired = TRUE;
-  							if(!nodeBusy)
+  							//if(!nodeBusy)
   							{
+  								// connection  to parent is lost ... route failure... reset parent and broadcast lost connection
+			  					if(curEntry->nodeId == chosenParent)
+			  					{	
+			  						dbg("Routing", "######### Connection to mote %d lost!\n", curEntry->nodeId);
+			  						localHops = 0xffff; 	// lower is better
+			 						localAvgRSSI = 0;	    // higher is better
+			 						chosenParent = 0xffff; 	// 0xffff = no parent 
+			 						localVersion = call Random.rand16();
+			 						if(localVersion == UNDEFINED) localVersion--;
+			 						//call Leds.set(0);
+			 						enqBeacon();
+			  					}
+			  					
   								curEntry->nodeId = AM_MAXNODEID;
   								curEntry->lastContact = 0;
-  								curEntry->parentMote = 0xffff;
+  								curEntry->parentMote = UNDEFINED;
 		  						curEntry->childMote = FALSE;
-		  						curEntry->hops = 0xffff;
+		  						curEntry->hops = UNDEFINED;
 		  						curEntry->avgRSSI = 0;
   							}
   						}
@@ -524,10 +549,32 @@ implementation
   			//
   			//****************************************************************************************
   			
+  			
+  			//always update route if msg from parent
+  			if(msgReceived->sender == chosenParent)
+  			{
+  				dbg("Routing","######## msg received from parent: sender=%d, senderParent=%d\n",msgReceived->sender, msgReceived->parent);
+  				//new parent
+  				if(msgReceived->parent == 0xffff)
+  				{
+  					chosenParent = 0xffff;
+  					localVersion = msgReceived->version;
+  					localAvgRSSI = 0;
+  					localHops = 0xffff;
+  				}
+  				else
+  				{
+  				
+	  				localVersion = msgReceived->version;
+	  				localAvgRSSI = msgReceived->avgRSSI + avgRssiOfSender;
+	  				localHops 	 = msgReceived->hops + 1;
+	  			}		
+  				// broadcast new info
+  				enqBeacon();
+  			}
   			//update route if necessary
   			
-  			if((msgReceived->parent != TOS_NODE_ID)) //&&  // msg not from child, avoids loops
-  			    //(msgReceived->version != localVersion))	// new version, because mote with an old hopCount could be new in range
+  			if((msgReceived->parent != TOS_NODE_ID) && (msgReceived->parent != 0xffff)) //&&  // msg not from child, avoids loops
   			{
   				if((msgReceived->hops + 1 < localHops) || // better hopCount
   						((msgReceived->hops+1 == localHops) && ((msgReceived->avgRSSI + avgRssiOfSender) < localAvgRSSI) ))	//same hopCount but better RSSI?
@@ -543,19 +590,6 @@ implementation
   					enqBeacon();
   				}
   			}
-  			//always update route if msg from parent
-  			if(msgReceived->sender == chosenParent)
-  			{
-  				//new parent
-  				chosenParent = msgReceived->sender;
-  				localVersion = msgReceived->version;
-  				localAvgRSSI = msgReceived->avgRSSI + avgRssiOfSender;
-  				localHops 	 = msgReceived->hops + 1;
-  					
-  				// broadcast new info
-  				enqBeacon();
-  			}
-  			
   			return msg;
   		}
   		//dbg("TestSerialC","received msg on channel %d\n",id);
@@ -757,12 +791,16 @@ implementation
   	*/
   	void enqAck()
   	{
-		CommandMsg* lastMsg = (CommandMsg*)&rcvRadio;
+  		CommandMsg* lastMsg;
+  		message_t *newmsg;
+  		CommandMsg* msgToSend;
+  		
+		lastMsg = (CommandMsg*)&rcvRadio;
 		//CommandMsg* sent = (CommandMsg*)&sndRadio;
-		message_t *newmsg = call RadioMsgPool.get();
+		newmsg = call RadioMsgPool.get();
 		
 		
-		CommandMsg* msgToSend = (CommandMsg*)(call RadioPacket.getPayload(newmsg, sizeof (CommandMsg)));
+		msgToSend = (CommandMsg*)(call RadioPacket.getPayload(newmsg, sizeof (CommandMsg)));
 		//dbg("TestSerialC","got ack msg from pool\n");
 		//dbg("TestSerialC","override sndRadio\n");
 		//dbg("TestSerialC","send radio ack -> sndRadio-recv: %d sndRadio-sender: %d sndRadio-ack: %d\n",sent->receiver,sent->sender, sent->isAck);
@@ -777,7 +815,7 @@ implementation
 		
 
 		//dbg("TestSerialC","send ack to: %d from %d\n",lastMsg->sender,TOS_NODE_ID);
-
+		
 		if (call RadioQueue.enqueue(newmsg) != SUCCESS)
 		{
 			dbg("TestSerialC","couldnt enqueue msg\n");
@@ -912,16 +950,23 @@ implementation
   	*/
   	void radioSend(CommandMsg *receivedMsgToSend)
   	{
+  		message_t *newMsg;
+  		CommandMsg* msgToSend;
+  		
 		// is radio unused?
-  		message_t *newMsg = call RadioMsgPool.get();
+  		newMsg = call RadioMsgPool.get();
 		
-		CommandMsg* msgToSend = (CommandMsg*)(call RadioPacket.getPayload(newMsg, sizeof (CommandMsg)));
+		msgToSend = (CommandMsg*)(call RadioPacket.getPayload(newMsg, sizeof (CommandMsg)));
+		memcpy(msgToSend,receivedMsgToSend,sizeof(CommandMsg));
 		msgToSend->sender = TOS_NODE_ID;
+		msgToSend->type = AM_COMMANDMSG;
+		/*
 		msgToSend->seqNum = receivedMsgToSend->seqNum;
 		msgToSend->ledNum = receivedMsgToSend->ledNum;
 		msgToSend->receiver = receivedMsgToSend->receiver;
 		msgToSend->isAck = 0;
 		msgToSend->type = AM_COMMANDMSG;
+		*/
 		
 		//dbg("TestSerialC","got cmd forward msg from pool\n");
 		
@@ -941,8 +986,11 @@ implementation
   	*/
   	void enqBeacon()
   	{
-  		message_t *newMsg = call RadioMsgPool.get();
-		BeaconMsg* msgToSend = (BeaconMsg*)(call RadioPacket.getPayload(newMsg, sizeof (BeaconMsg)));
+  		message_t *newMsg;
+  		BeaconMsg* msgToSend;
+
+  		newMsg = call RadioMsgPool.get();
+		msgToSend = (BeaconMsg*)(call RadioPacket.getPayload(newMsg, sizeof (BeaconMsg)));
 		msgToSend->sender = TOS_NODE_ID;
 		msgToSend->type = AM_BEACONMSG;
 		msgToSend->hops = localHops;
@@ -969,15 +1017,19 @@ implementation
   	void enqTable()
   	{
 		int i;
-		message_t *newMsg = call RadioMsgPool.get();
-		TableMsg* msgToSend = (TableMsg*)(call RadioPacket.getPayload(newMsg, sizeof (TableMsg)));
-		//dbg("TestSerialC","got table msg from pool\n");
+		message_t *newMsg;
+		TableMsg* msgToSend;
 		
-		if(msgToSend == NULL)
+		if(msgToSend == NULL || chosenParent == UNDEFINED)
 		{
 			dbg("TestSerialC","null pointer on msg struct\n");
 			return;
 		}
+		
+		newMsg = call RadioMsgPool.get();
+		msgToSend = (TableMsg*)(call RadioPacket.getPayload(newMsg, sizeof (TableMsg)));
+		//dbg("TestSerialC","got table msg from pool\n");
+		
 		msgToSend->sender = TOS_NODE_ID;
 		msgToSend->receiver = 99;
 		msgToSend->seqNum = ++localSeqNumberTable;
@@ -1025,8 +1077,15 @@ implementation
   	*/
   	void forwardTable(TableMsg* msg)
   	{
-		message_t* newMsg = call RadioMsgPool.get();
-		TableMsg* tblMsg = call RadioPacket.getPayload(newMsg, sizeof (TableMsg));
+  		message_t* newMsg;
+  		TableMsg* tblMsg;
+  		if(chosenParent == UNDEFINED)
+		{
+			dbg("Routing","no parent - do not send tableMsg\n");
+			return;
+		}
+		newMsg = call RadioMsgPool.get();
+		tblMsg = call RadioPacket.getPayload(newMsg, sizeof (TableMsg));
 		memcpy(tblMsg,msg,sizeof(TableMsg));
 	
 		tblMsg->type = AM_TABLEMSG;
@@ -1075,22 +1134,30 @@ implementation
 	 		}else if(id == AM_BEACONMSG)
 	 		{
 	 			//dbg("TestSerialC","sent BeaconMsg\n");
-	 			if( tableSendCounter==6 )
-	 			{
-	 				enqTable(); 
-	 				tableSendCounter = 0;
-	 			}
-	 			else
-	 			{
-	 				tableSendCounter++;
-	 			}
+	 			
 	 		}
 	 		else if(id == AM_TABLEMSG)
 			{
+				bool acked;
 	 			TableMsg* sentMsg;
 	 			sentMsg = (TableMsg*)&sndRadioLast;
-	 			//dbg("TestSerialC","sent TableMsg\n");
-	 			//dbg("TestSerialC","SendDone for tableMsg: receiver: %d, sender: %d\n",sentMsg->receiver,sentMsg->sender);
+	 			
+	 			acked = call PacketAcknowledgements.wasAcked(msg);
+	 			if(!acked)
+	 			{
+	 				dbg("Acked","retransmit tableMsg %d\n",acked);
+	 				forwardTable((TableMsg*)&sndRadioLast);
+	 			}
+			}
+			else if(id == AM_SENSORMSG)
+			{
+				bool acked;
+				acked = call PacketAcknowledgements.wasAcked(msg);
+	 			if(!acked)
+	 			{
+	 				dbg("Acked","retransmit sensorMsg %d\n",acked);
+	 				radioSendSensorMsg((SensorMsg*)&sndRadioLast);
+	 			}
 			}
 		}
 		radioBusy = FALSE;
@@ -1307,9 +1374,16 @@ implementation
   	*/
   	void radioSendSensorMsg(SensorMsg* msg)
   	{
-		message_t *newMsg = call RadioMsgPool.get();
-	
-		SensorMsg* sensorMsg = call RadioPacket.getPayload(newMsg, sizeof (SensorMsg));
+		message_t *newMsg;
+  		SensorMsg* sensorMsg;
+  		if(chosenParent == UNDEFINED)
+  		{
+  			dbg("Routing","wont forward sensor msg -> no parent node\n");
+  			return;
+  		}
+  		
+		newMsg = call RadioMsgPool.get();
+		sensorMsg = call RadioPacket.getPayload(newMsg, sizeof (SensorMsg));
 		memcpy(sensorMsg,msg,sizeof(SensorMsg));
 		sensorMsg->type = AM_SENSORMSG;
 		
@@ -1334,7 +1408,7 @@ implementation
   	{
   		int i;
   		
-  		dbg("Routing","Routing: search for nodeId: %d in table children\n",moteId);
+  		dbg("Routing","Routing: search for nodeId: %d in table children -> currentParent: %d\n",moteId,chosenParent);
   		for(i = 0 ; i < AM_TABLESIZE; i++)
   		{
   			dbg("Routing","table[%d].nodeId=%d, isChild %d\n",i,neighborTable[i].nodeId,neighborTable[i].childMote);

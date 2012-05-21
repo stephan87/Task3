@@ -22,11 +22,12 @@ enum {
   AM_MAXNODEID				= 65535,	// used as default undefined value
   NREADINGS 				= 5, 		// count of sensor reading until transmission
   DEFAULT_SAMPLING_INTERVAL = 1000, 	// Default sensor read interval period.
-  SERIAL_ADDR				= 99 		// serial address
+  SERIAL_ADDR				= 99, 		// serial address
+  UNDEFINED					= 0xFFFF	// undefined value
 };
 
 typedef nx_struct CommandMsg {
-	nx_uint8_t type;
+nx_uint8_t type;
   nx_uint16_t seqNum;
   nx_uint16_t ledNum;
   nx_uint16_t sender;

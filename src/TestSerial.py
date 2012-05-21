@@ -12,11 +12,12 @@ r = t.radio()
 sf = SerialForwarder(9002)
 #throttle = Throttle(t, 10)
 
-t.addChannel("TestSerialC", sys.stdout);
+#t.addChannel("TestSerialC", sys.stdout);
 t.addChannel("TestSerialCSensor", sys.stdout);
 #t.addChannel("Routing",sys.stdout);
 #t.addChannel("Pool",sys.stdout);
 #t.addChannel("TestSerialCSerial",sys.stdout);
+t.addChannel("Acked", sys.stdout);
 
 f = open("topo.txt", "r")
 for line in f:
@@ -43,6 +44,8 @@ for i in range(0, nodes):
 for i in range (0, 1000000):
 	t.runNextEvent();
 	time.sleep(0.01);
+	if i == 500:
+		t.getNode(2).turnOff();
 	sf.process();
 
 
