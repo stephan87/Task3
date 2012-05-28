@@ -10,6 +10,10 @@ implementation {
   components new TimerMilliC() as SensorTimer;
   components new QueueC(message_t*, 10) as RadioQueueC;
   components new PoolC(message_t, 10) as RadioMsgPoolC;
+  components new QueueC(uint8_t, 10) as RadioTypeQueueC;
+  components new QueueC(message_t*, 5) as SerialQueueC;
+  components new QueueC(uint8_t, 5) as SerialTypeQueueC;
+  components new PoolC(message_t, 5) as SerialMsgPoolC;
 //  components CC2420ActiveMessageC;
   components RandomC;
   
@@ -42,7 +46,11 @@ implementation {
 //  App.CC2420Packet -> CC2420ActiveMessageC;
   App.Random -> RandomC;
   App.RadioQueue -> RadioQueueC;
+  App.RadioTypeQueue -> RadioTypeQueueC;
   App.RadioMsgPool -> RadioMsgPoolC;
+  App.SerialQueue -> SerialQueueC;
+  App.SerialTypeQueue -> SerialTypeQueueC;
+  App.SerialMsgPool -> SerialMsgPoolC;
   
 #ifndef SIMULATION
   App.LocalTime -> LocalTimeSecondC;
